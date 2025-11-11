@@ -18,14 +18,13 @@ setuptools.setup(
         "Operating System :: OS Independent",
     ],
     install_requires=[
-        # 'matplotlib',
-        # 'numpy',
-        # 'pandas',
-        # 'geopandas',
-        # 'rasterio',
-        # 'scipy',
-        # 'toolz',
-        # 'scipy',
-        # 'contextily'
+        'matplotlib',
+        'numpy',
+        'pandas',
+        'geopandas',
+        'rasterio',
+        'scipy',
+        'seaborn',
+        'tqdm',
       ],
 )
