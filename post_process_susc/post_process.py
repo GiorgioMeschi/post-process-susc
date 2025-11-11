@@ -24,6 +24,7 @@ class PostProcess:
                                             xboxmin_pie= 0,
                                             yboxmin_pie= 0.7,
                                             pixel_to_ha_factor= 100,
+                                            normalize_over_y_axis= 10,
                                             ncol=12,
                                             nrow=4
                                             ),
@@ -331,7 +332,7 @@ class PostProcess:
                 allow_hist= True,
                 allow_pie= True,
                 allow_fires= True,
-                normalize_over_y_axis= 1,
+                normalize_over_y_axis= self.settings_plt_susc['normalize_over_y_axis'],
                 limit_barperc_to_show= 2,
                 is_categorical = True
             )
