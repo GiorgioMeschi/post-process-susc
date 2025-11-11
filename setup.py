@@ -19,7 +19,6 @@ setuptools.setup(
     ],
     install_requires=[
         'matplotlib',
-        'numpy',
         'pandas',
         'geopandas',
         'rasterio',
