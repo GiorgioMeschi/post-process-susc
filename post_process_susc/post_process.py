@@ -372,7 +372,7 @@ class PostProcess:
     def run_all(self):
 
         if self.four_models:
-            cls = [1,2,3,4]
+            cls = ['1','2','3','4']
             for cl in cls:
                 logging.info(f'Processing class {cl}...')
                 
@@ -403,10 +403,10 @@ class PostProcess:
                     pool.starmap(self.get_categoric_susc, [(os.path.join(folder_susc, susc_name), thresholds, cl) 
                                                             for susc_name in susc_names])
                 
-                logging.info('Merging class outputs...')
-                # merge susc of different cl outputs
-                with mp.Pool(processes=20) as pool:
-                    pool.starmap(self.merge_cl_output, [(year, month) for year in self.years for month in self.months])
+            logging.info('Merging class outputs (all the cls)')
+            # merge susc of different cl outputs
+            with mp.Pool(processes=20) as pool:
+                pool.starmap(self.merge_cl_output, [(year, month, cls) for year in self.years for month in self.months])
 
 
         else:
