@@ -51,7 +51,7 @@ class PostProcess:
         self.four_models = four_models
         self.R = gt.Raster()
         self.F = ff.FireTools()
-        self.I = gt.ImageTools()
+        self.I = gt.Imtools()
 
         # logging to file datapath
         logging.basicConfig(
