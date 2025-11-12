@@ -1,5 +1,6 @@
 
 import os
+import logging
 import json
 import rasterio as rio
 import numpy as np
@@ -52,6 +53,14 @@ class PostProcess:
         self.F = ff.FireTools()
         self.I = gt.ImageTools()
 
+        # logging to file datapath
+        logging.basicConfig(
+            filename=os.path.join(self.datapath, 'post_process.log'),
+            level=logging.INFO,
+            format='%(asctime)s - %(levelname)s - %(message)s',
+            filemode='w'
+        )
+
     
     def remove_tile_borders(self, tile, year, month, num_px_to_remove = 10, cl = ''):
 
@@ -85,12 +94,11 @@ class PostProcess:
                 os.remove(path)
 
         except Exception as e:
-            print(f'error: {e}')
+            logging.info(f'error: {e}')
     
     
     def merge_susc_tiles(self, year, month, cl = '', clean = False):
 
-        print(f"{year}-{month:02d}...")
         outfile = f'{self.datapath}/susceptibility/{self.vs}/{cl}/susc_{year}_{month}.tif'
         os.makedirs(os.path.dirname(outfile), exist_ok=True)
         if not os.path.exists(outfile):
@@ -133,7 +141,7 @@ class PostProcess:
             os.rename(outpath, path)
             os.remove(f'{basep}/susc_{yr}_raw.tif')
         except Exception as e:
-            print(f'error in {yr}: {e}')
+            logging.info(f'error in {yr}: {e}')
     
     def eval_thresholds(self, cl = ''):
 
@@ -300,7 +308,7 @@ class PostProcess:
                                 reference_file = susc_path, dtype = np.int8(), nodata = 0)
 
         except Exception as e:
-            print(f'no susc for {year}_{month}: {e}')
+            logging.info(f'no susc for {year}_{month}: {e}')
 
 
     def plot_susc(self, total_ba, tr1, tr2, year, month):
@@ -340,7 +348,7 @@ class PostProcess:
             self.F.plot_susc_with_bars(**settings)
             plt.close('all')
         except Exception as e:
-            print(f'no susc map for - {year}_{month}: {e}')
+            logging.info(f'no susc map for - {year}_{month}: {e}')
         
 
     def merge_all_pngs(self):
@@ -366,32 +374,36 @@ class PostProcess:
         if self.four_models:
             cls = [1,2,3,4]
             for cl in cls:
-                print(f'Processing class {cl}...')
+                logging.info(f'Processing class {cl}...')
                 
                 # insert some checks of all the susc tiles are present, if not stop the process.
                 
-
+                logging.info('Removing tile borders...')
                 with mp.Pool(25) as pool:
                     pool.starmap(self.remove_tile_borders, [(tile, year, month, cl) 
                                                             for tile in self.tiles for year in self.years for month in self.months])
 
+                logging.info('Merging susc tiles...')
                 with mp.Pool(25) as pool:
                     pool.starmap(self.merge_susc_tiles, [(year, month, cl) 
                                                         for year in self.years for month in self.months])
-                    
+                
+                logging.info('Reprojecting merged susc...')
                 yearmonths = [f'{year}_{month}' for year in self.years for month in self.months]
                 for yr in yearmonths:
                     self.reproj_merged_susc(yr, cl)
 
+                logging.info('Evaluating thresholds...')
                 thresholds = self.eval_thresholds(cl)
 
+                logging.info('Getting categoric susc...')
                 folder_susc = f'{self.datapath}/susceptibility/{self.vs}/{cl}' 
                 susc_names = [i for i in os.listdir(folder_susc) if i.endswith('.tif') and not i.endswith('raw.tif')]
                 with mp.Pool(processes=20) as pool:
                     pool.starmap(self.get_categoric_susc, [(os.path.join(folder_susc, susc_name), thresholds, cl) 
                                                             for susc_name in susc_names])
                 
-
+                logging.info('Merging class outputs...')
                 # merge susc of different cl outputs
                 with mp.Pool(processes=20) as pool:
                     pool.starmap(self.merge_cl_output, [(year, month) for year in self.years for month in self.months])
@@ -401,20 +413,25 @@ class PostProcess:
             
             # insert some checks of all the susc tiles are present, if not stop the process.
 
+            logging
             with mp.Pool(self.cores) as pool:
                 pool.starmap(self.remove_tile_borders, [(tile, year, month) 
                                                         for tile in self.tiles for year in self.years for month in self.months])
 
+            logging.info('Merging susc tiles...')
             with mp.Pool(self.cores) as pool:
                 pool.starmap(self.merge_susc_tiles, [(year, month) 
                                                     for year in self.years for month in self.months])
-                
+
+            logging.info('Reprojecting merged susc...')    
             yearmonths = [f'{year}_{month}' for year in self.years for month in self.months]
             for yr in yearmonths:
                 self.reproj_merged_susc(yr)
-
+            
+            logging.info('Evaluating thresholds...')
             thresholds = self.eval_thresholds()
 
+            logging.info('Getting categoric susc...')
             folder_susc = f'{self.datapath}/susceptibility/{self.vs}' #/cl
             susc_names = [i for i in os.listdir(folder_susc) if i.endswith('.tif') and not i.endswith('raw.tif')]
             with mp.Pool(processes=self.cores) as pool:
@@ -423,18 +440,23 @@ class PostProcess:
             
 
         # same operation for cl and not
-        print('------------------------------')
+        logging.info('--------------common op----------------')
+
+        logging.info('Getting fuel type...')
         self.get_fuel_type()
+
+        logging.info('Getting hazard maps...')
         with mp.Pool(processes=self.cores) as pool:
             pool.starmap(self.get_haz, [(year, month) 
                                         for year in self.years for month in self.months])
         
-        # plot
+        logging.info('Plotting susc maps...')
         total_ba = gpd.read_file(self.fires_file).area.sum() / 10000
         with mp.Pool(processes=self.cores) as pool:
             pool.starmap(self.plot_susc, [(total_ba, thresholds[0], thresholds[1], year, month) 
                                         for year in self.years for month in self.months])
         
+        logging.info('Merging all PNGs...')
         self.merge_all_pngs()
 
         
