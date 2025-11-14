@@ -423,7 +423,7 @@ class PostProcess:
                 month= month,
                 season= False,
                 total_ba_period= total_ba,
-                susc_nodata= -1,
+                susc_nodata= 0,
                 pixel_to_ha_factor= self.settings_plt_susc['pixel_to_ha_factor'],
                 allow_hist= allow_hist,
                 allow_pie= True,
@@ -439,40 +439,82 @@ class PostProcess:
             logging.info(f'no susc map for - {year}_{month}: {e}')
         
 
-    def plot_alternative_susc(self, year: int, month: int):
+    def plot_alternative_susc(self, total_ba, year: int, month: int):
 
         '''
         Plot an alternative version of the susceptibility map where class 1,2,3 are reclassified to 4,5,6 if fuel type is 1 (grass)
         '''
 
-        path = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/susc_{year}_{month}.tif'
-        ft_path = f'{self.datapath}/fuel_type_4cl/{self.vs}/ft.tif'
+        try:
+            path = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/susc_{year}_{month}.tif'
+            ft_path = f'{self.datapath}/fuel_type_4cl/{self.vs}/ft.tif'
 
-        susc = self.R.read_1band(path)
-        ft = self.R.read_1band(ft_path)
+            susc = self.R.read_1band(path)
+            ft = self.R.read_1band(ft_path)
 
-        # put class 4 5 and 6 when susc is 1 2 3 and ft is 1
-        alt_susc = susc.copy()
-        mask = (susc == 1) & (ft == 1)
-        alt_susc[mask] = 4
-        mask = (susc == 2) & (ft == 1)
-        alt_susc[mask] = 5
-        mask = (susc == 3) & (ft == 1)
-        alt_susc[mask] = 6
+            # put class 4 5 and 6 when susc is 1 2 3 and ft is 1
+            alt_susc = susc.copy()
+            mask = (susc == 1) & (ft == 1)
+            alt_susc[mask] = 4
+            mask = (susc == 2) & (ft == 1)
+            alt_susc[mask] = 5
+            mask = (susc == 3) & (ft == 1)
+            alt_susc[mask] = 6
 
-        # plot
-        outpath = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/PNG/susc_alternative_plot_{year}{month}.png'
-        os.makedirs(os.path.dirname(outpath), exist_ok=True)
-        self.R.plot_raster(alt_susc, title = f'susc {year}/{month:02d}',
-                           array_classes = [-1,0.1,1.1,2.1,3.1,4.1,5.1,6.1],
-                           array_names = ['No Data', 'Low', 'Medium', 'High', 'L - Grass', 'M - Grass', 'H - Grass'],
-                           array_colors = ['#0bd1f700','green', 'yellow', 'red', "#5be0ad", "#cece75", "#e081a2"],
-                           shrink_legend = 0.4,
-                           dpi = 200,
-                           outpath = outpath,
-                           figsize = (12,10)
-                           )
+            # save
+            out_alt_susc = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/susc_{year}_{month}_alternative.tif'
+            self.R.save_raster_as(alt_susc, out_alt_susc, path, dtype = np.int8(), nodata = 0)
+
+            # plot
+            if self.op == True:
+                total_ba = None
+                allow_hist = False
+                allow_fires = False
+            else:
+                allow_hist = True
+                allow_fires = True
+
         
+            out = os.path.join( os.path.dirname(path), 'PNG', 'alternative')
+            os.makedirs(out, exist_ok=True)
+            # outputlike = f'{outfolder}/susc_plot_{year}{month}.png'
+            # if not os.path.exists(outputlike):
+            settings = dict(
+                fires_file= self.fire_path,
+                fires_col= self.fires_col, 
+                crs= self.working_crs,
+                susc_path= out_alt_susc,
+                xboxmin_hist= self.settings_plt_susc['xboxmin_hist'],
+                yboxmin_hist= self.settings_plt_susc['yboxmin_hist'],
+                xboxmin_pie= self.settings_plt_susc['xboxmin_pie'],
+                yboxmin_pie= self.settings_plt_susc['yboxmin_pie'],
+                threshold1= 0,
+                threshold2= 0,
+                out_folder= out,
+                year= year,
+                month= month,
+                season= False,
+                total_ba_period= total_ba,
+                susc_nodata= 0,
+                pixel_to_ha_factor= self.settings_plt_susc['pixel_to_ha_factor'],
+                allow_hist= allow_hist,
+                allow_pie= True,
+                allow_fires= allow_fires,
+                normalize_over_y_axis= self.settings_plt_susc['normalize_over_y_axis'],
+                limit_barperc_to_show= 2,
+                is_categorical = True,
+                options = dict( array_classes = [-1,0.1,1.1,2.1,3.1,4.1,5.1,6.1],
+                                array_names = ['No Data', 'Low', 'Medium', 'High', 'L - Grass', 'M - Grass', 'H - Grass'],
+                                array_colors = ['#0bd1f700','green', 'yellow', 'red', "#5be0ad", "#cece75", "#e081a2"],
+                               )
+                )
+            
+
+            self.F.plot_susc_with_bars(**settings)
+            plt.close('all')
+        except Exception as e:
+            logging.info(f'no susc map for - {year}_{month}: {e}')
+
 
 
     def plot_haz(self, year: int, month: int):
@@ -534,7 +576,7 @@ class PostProcess:
 
 
 
-    def merge_all_pngs(self, susc = True):
+    def merge_all_pngs(self, susc = True, alternative = ''):
 
         '''
         Merge all the susceptibility or fuel png plots into a single image
@@ -544,9 +586,9 @@ class PostProcess:
         name = 'susc' if susc else 'fuel'
         year_filenames = [f'{name}_plot_{yrm}' for yrm in yearmonths]
         if susc:
-            basep = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/PNG'
+            basep = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/PNG/{alternative}'
         else:
-            basep = f'{self.datapath}/fuel_maps/{self.vs}/PNG'
+            basep = f'{self.datapath}/fuel_maps/{self.vs}/PNG/{alternative}'
 
         year_files = [f"{basep}/{filename}.png" for filename in year_filenames]
         year_files = [f for f in year_files if os.path.exists(f)]
