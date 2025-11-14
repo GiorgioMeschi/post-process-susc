@@ -24,9 +24,9 @@ os.environ["PROJ_DATA"] = pyproj_path
 
 
 class PostProcess:
-    def __init__(self, datapath, vs, years, months, tiles, 
-                 dem_file, working_crs, fire_path,
-                 fires_col, veg_path, mapping_path,
+    def __init__(self, datapath: str, vs: str, years: list[int], months: list[int], tiles: list[str], 
+                 dem_file: str, working_crs: str, fire_path: str,
+                 fires_col: str, veg_path: str, mapping_path: str,
                  settings_plt_susc=dict(    xboxmin_hist= 0,
                                             yboxmin_hist= 0,
                                             xboxmin_pie= 0,
@@ -37,11 +37,36 @@ class PostProcess:
                                             nrow=4
                                             ),
                       
-                 cores = 25,
+                 cores= 25,
                  four_models=False,
                  op = False,
                  custom_fuel_filename = None):
 
+        '''
+        pProcess susceptibility maps and get fuel maps based on the a default tiled files structure.
+
+        Parameters
+        ----------
+        datapath : path to the main data folder.   
+        vs : version of the analysis
+        years : list of years to process
+        months : list of months to process
+        tiles : list of tiles names to process
+        dem_file : path to a DEM file to use as reference for reprojection
+        working_crs : crs code (eg. 'EPSG:32632') of the analysis
+        fire_path : path to the fire shapefile
+        fires_col : name of the column in the fire shapefile that contains the date of the fire
+        veg_path : path to the vegetation raster file
+        mapping_path : path to the json file that contains the mapping between vegetation and fuel types
+        settings_plt_susc : dictionary with settings for the plotting functions
+        cores : number of cores to use for multiprocessing
+        four_models : if True process the four models outputs separately
+        op : if True run in operational mode (no merged plots and no eval of thresholds)
+        custom_fuel_filename : if provided save the fuel map also in this path
+
+        use run_all() to execute all the processing steps. 
+
+        '''
         self.vs = vs 
         self.datapath = datapath
         self.years = years
@@ -73,7 +98,12 @@ class PostProcess:
         )
 
     
-    def remove_tile_borders(self, tile, year, month, num_px_to_remove = 10, cl = ''):
+    def remove_tile_borders(self, tile: str, year: int, month: int, num_px_to_remove = 10, cl = ''):
+
+        '''
+        remove the borders to the buffered tiles in order to avoid issues when merging tiles
+        the parameter cl governs the clipping when four_models is True
+        '''
 
         path = os.path.join(self.datapath, 'ML', tile, 'susceptibility', self.vs, cl, f'{year}_{month}', 'annual_maps', f'Annual_susc_{year}_{month}.tif')
         try:
@@ -108,7 +138,11 @@ class PostProcess:
             logging.info(f'error: {e}')
     
     
-    def merge_susc_tiles(self, year, month, cl = '', clean = False):
+    def merge_susc_tiles(self, year: int, month: int, cl = '', clean = False):
+
+        '''
+        Merge the susceptibility tiles into a single country map. (for each class cl is four_models is True)
+        '''
 
         outfile = f'{self.datapath}/susceptibility/{self.vs}/{cl}/susc_{year}_{month}.tif'
         os.makedirs(os.path.dirname(outfile), exist_ok=True)
@@ -141,7 +175,12 @@ class PostProcess:
                 os.remove(outfile)
 
     
-    def reproj_merged_susc(self, yr, cl = ''):  
+    def reproj_merged_susc(self, yr: str, cl = ''):  
+
+        '''
+        Reproject the merged susceptibility map to the working CRS
+        yr : string with year_month format (ie 2011_1)
+        '''
 
         basep = f'{self.datapath}/susceptibility/{self.vs}/{cl}'
         try:  
@@ -155,6 +194,10 @@ class PostProcess:
             logging.info(f'error in {yr}: {e}')
     
     def eval_thresholds(self, cl = ''):
+
+        '''
+        Compute the thresholds based on the burned area and susceptibility values for categorizing the susceptibility
+        '''
 
         allyears = [f"{year}_{month}" for year in self.years for month in self.months]
         home = os.path.dirname(self.datapath)
@@ -227,7 +270,11 @@ class PostProcess:
         return [lv1, lv2]
 
 
-    def get_categoric_susc(self, susc_path, thresholds: list[float], cl = ''):
+    def get_categoric_susc(self, susc_path: str, thresholds: list[float], cl = ''):
+
+        '''
+        Categorize the susceptibility map based on the provided thresholds
+        '''
 
         susc_class_oufolder = os.path.join(self.datapath, 'susceptibility', self.vs, 'susc_classified', cl)
         os.makedirs(susc_class_oufolder, exist_ok=True)
@@ -245,6 +292,11 @@ class PostProcess:
         
 
     def get_fuel_type(self):
+
+        '''
+        Compute the fuel type map based on the vegetation raster and the mapping file
+        '''
+
         out_ft = f'{self.datapath}/fuel_type_4cl/{self.vs}/ft.tif'
         os.makedirs(os.path.dirname(out_ft), exist_ok=True)
         veg = self.R.read_1band(self.veg_path)
@@ -254,7 +306,11 @@ class PostProcess:
                             reference_file = self.dem_file, dtype = np.int8(), nodata = 0)
 
 
-    def merge_cl_output(self, year, month, cls):
+    def merge_cl_output(self, year: int, month: int, cls: list[str]):
+
+        '''
+        Merge the classified susceptibility maps from each class into a single map, for the case four_models is True
+        '''
 
         folder_merged = f'{self.datapath}/susceptibility/{self.vs}/susc_classified'
         outfile = f'{folder_merged}/susc_{year}_{month}.tif'
@@ -299,7 +355,11 @@ class PostProcess:
 
 
     # get hazards (fuel maps)
-    def get_haz(self, year, month):
+    def get_haz(self, year: int, month: int):
+
+        '''
+        Compute the fuel map (12 classes) based on the categorized susceptibility map and the fuel type map
+        '''
 
         try:
             folder = f'{self.datapath}/susceptibility/{self.vs}/susc_classified'
@@ -328,6 +388,10 @@ class PostProcess:
 
 
     def plot_susc(self, total_ba, tr1, tr2, year, month):
+
+        '''
+        Plot the susceptibility map with the burned area statistics
+        '''
 
         if self.op == True:
             total_ba = None
@@ -375,7 +439,12 @@ class PostProcess:
             logging.info(f'no susc map for - {year}_{month}: {e}')
         
 
-    def plot_alternative_susc(self, year, month):
+    def plot_alternative_susc(self, year: int, month: int):
+
+        '''
+        Plot an alternative version of the susceptibility map where class 1,2,3 are reclassified to 4,5,6 if fuel type is 1 (grass)
+        '''
+
         path = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/susc_{year}_{month}.tif'
         ft_path = f'{self.datapath}/fuel_type_4cl/{self.vs}/ft.tif'
 
@@ -406,7 +475,11 @@ class PostProcess:
         
 
 
-    def plot_haz(self, year, month):
+    def plot_haz(self, year: int, month: int):
+
+        '''
+        Plot the fuel map with the burned area statistics
+        '''
 
         if self.op == True:
             allow_hist = False
@@ -463,6 +536,10 @@ class PostProcess:
 
     def merge_all_pngs(self, susc = True):
 
+        '''
+        Merge all the susceptibility or fuel png plots into a single image
+        '''
+
         yearmonths = [f"{year}{month}" for year in self.years for month in self.months]
         name = 'susc' if susc else 'fuel'
         year_filenames = [f'{name}_plot_{yrm}' for yrm in yearmonths]
@@ -486,6 +563,11 @@ class PostProcess:
 
 
     def run_all(self):
+
+        '''
+        Run all the post-processing steps based on the initialized parameters.
+        The methodology depends on the four_models and op parameters.
+        '''
         
         if self.four_models:
             cls = ['1','2','3','4']
