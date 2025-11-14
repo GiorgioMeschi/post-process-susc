@@ -591,9 +591,10 @@ class PostProcess:
             pool.starmap(self.plot_haz, [(year, month) 
                                         for year in self.years for month in self.months])
         
-        logging.info('Merging all PNGs...')
-        self.merge_all_pngs(susc = True)
-        self.merge_all_pngs(susc = False) # fuel maps
+        if not self.op:
+            logging.info('Merging all PNGs...')
+            self.merge_all_pngs(susc = True)
+            self.merge_all_pngs(susc = False) # fuel maps
 
         
 
