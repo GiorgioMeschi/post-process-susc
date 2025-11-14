@@ -16,6 +16,13 @@ import seaborn as sns
 from geospatial_tools import geotools as gt
 from geospatial_tools import FF_tools as ff
 
+import pyproj
+pyproj_path = pyproj.datadir.get_data_dir()
+import os
+os.environ["GTIFF_SRS_SOURCE"] = "EPSG"
+os.environ["PROJ_DATA"] = pyproj_path
+
+
 class PostProcess:
     def __init__(self, datapath, vs, years, months, tiles, 
                  dem_file, working_crs, fire_path,
@@ -31,7 +38,9 @@ class PostProcess:
                                             ),
                       
                  cores = 25,
-                 four_models=False):
+                 four_models=False,
+                 op = False,
+                 custom_fuel_filename = None):
 
         self.vs = vs 
         self.datapath = datapath
@@ -44,11 +53,13 @@ class PostProcess:
         self.fires_col = fires_col
         self.veg_path = veg_path
         self.mapping_path = mapping_path
-
         self.settings_plt_susc = settings_plt_susc
 
         self.cores = cores
         self.four_models = four_models
+        self.op = op
+        self.custom_fuel_filename = custom_fuel_filename
+
         self.R = gt.Raster()
         self.F = ff.FireTools()
         self.I = gt.Imtools()
@@ -217,23 +228,20 @@ class PostProcess:
 
 
     def get_categoric_susc(self, susc_path, thresholds: list[float], cl = ''):
-        susc = self.R.read_1band(susc_path)
-        tr1, tr2 = thresholds
-        susc_cl = self.R.categorize_raster(susc, [tr1, tr2], nodata = -1)
-        # smooth with average filter 
-        susc_cl_float = susc_cl.astype(float)
-        # put -1 to nan for smoothing
-        susc_cl_float[susc_cl_float == -1] = np.nan
-        susc_cl_smoothed = ndimage.generic_filter(susc_cl_float, np.nanmean, size=3, mode='nearest')
-        susc_cl_smoothed[np.isnan(susc_cl_smoothed)] = 0
-        # type int
-        susc_cl_smoothed = susc_cl_smoothed.astype(np.int8)
-        # save
+
         susc_class_oufolder = os.path.join(self.datapath, 'susceptibility', self.vs, 'susc_classified', cl)
         os.makedirs(susc_class_oufolder, exist_ok=True)
         file1 = os.path.basename(susc_path)
         out1 = f'{susc_class_oufolder}/{file1}'
-        self.R.save_raster_as(susc_cl, out1, reference_file = susc_path, dtype = np.int8(), nodata = 0)
+
+        if not os.path.exists(out1):
+            susc = self.R.read_1band(susc_path)
+            tr1, tr2 = thresholds
+            susc_cl = self.R.categorize_raster(susc, [tr1, tr2], nodata = -1)
+            # type int
+            susc_cl = susc_cl.astype(np.int8)
+            # save
+            self.R.save_raster_as(susc_cl, out1, reference_file = susc_path, dtype = np.int8(), nodata = 0)
         
 
     def get_fuel_type(self):
@@ -250,18 +258,19 @@ class PostProcess:
 
         folder_merged = f'{self.datapath}/susceptibility/{self.vs}/susc_classified'
         outfile = f'{folder_merged}/susc_{year}_{month}.tif'
-        outfile2 = outfile.replace('.tif', '_smoothed.tif')
-        if not os.path.exists(outfile):
-            # merge tiles
-            files_to_merge = [f"{self.datapath}/susceptibility/{self.vs}/{cl}/susc_classified/susc_{year}_{month}.tif"
-                            for cl in cls]
+        out_smooth = f'{folder_merged}/susc_{year}_{month}_smoothed.tif'
+        out_repr = f'{folder_merged}/susc_{year}_{month}_reproj.tif'
+        # merge tiles
+        files_to_merge = [f"{self.datapath}/susceptibility/{self.vs}/susc_classified/{cl}/susc_{year}_{month}.tif"
+                        for cl in cls]
+        files_to_merge = [f for f in files_to_merge if os.path.exists(f)]
 
+        if len(files_to_merge) != 0:
             out = self.R.merge_rasters(outfile, np.nan, 'max', *files_to_merge)
-
+            
             # fix nan data (nan to -1)
             with rio.open(out) as src:
                 arr = src.read(1)
-                arr[np.isnan(arr)] = 0
                 out_meta = src.meta.copy()
                 out_meta.update({
                     'compress': 'lzw',
@@ -272,17 +281,20 @@ class PostProcess:
                 with rio.open(out, 'w', **out_meta) as dst:
                     dst.write(arr, 1)
                 # smooth
-                arr_float = arr.astype(float)
-                arr_smooth = ndimage.generic_filter(arr_float, np.nanmean, size=3, mode='nearest', cval=0)
+                arr = arr.astype(float)
+                arr_smooth = ndimage.generic_filter(arr, np.nanmean, size=3, mode='nearest', cval=0)
                 arr_smooth = np.rint(arr_smooth).astype(arr.dtype)
-                with rio.open(outfile2, 'w', **out_meta) as dst:
+                with rio.open(out_smooth, 'w', **out_meta) as dst:
                     dst.write(arr_smooth, 1)
+                del arr, arr_smooth
 
-        self.R.reproject_raster_as_v2(outfile2, outfile2.replace('.tif', '_reproj.tif'), self.dem_file, 
-                                    input_crs=self.working_crs, working_crs = self.working_crs, interpolation = 'near')
-        
-        os.rename(outfile2.replace('.tif', '_reproj.tif'), outfile)
-        os.remove(outfile2)
+            self.R.reproject_raster_as_v2(out_smooth, out_repr, self.dem_file, 
+                                        input_crs=self.working_crs, working_crs = self.working_crs, interpolation = 'near')
+            
+            os.rename(outfile, f'{folder_merged}/susc_{year}_{month}_raw.tif')
+            os.rename(out_repr, outfile)
+            os.remove(f'{folder_merged}/susc_{year}_{month}_raw.tif')
+            os.remove(out_smooth)
 
 
 
@@ -306,12 +318,24 @@ class PostProcess:
             hazard = self.R.contigency_matrix_on_array(susc_cl, ft, matrix, nodatax = 0, nodatay = 0)
             self.R.save_raster_as(hazard, out_hazard_file, 
                                 reference_file = susc_path, dtype = np.int8(), nodata = 0)
+            
+            if self.custom_fuel_filename is not None:
+                self.R.save_raster_as(hazard, self.custom_fuel_filename, 
+                                reference_file = susc_path, dtype = np.int8(), nodata = 0)
 
         except Exception as e:
-            logging.info(f'no susc for {year}_{month}: {e}')
+            logging.info(f'error get_haz for {year}_{month}: {e}\n')
 
 
     def plot_susc(self, total_ba, tr1, tr2, year, month):
+
+        if self.op == True:
+            total_ba = None
+            allow_hist = False
+            allow_fires = False
+        else:
+            allow_hist = True
+            allow_fires = True
 
         try:
             path = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/susc_{year}_{month}.tif'
@@ -337,9 +361,9 @@ class PostProcess:
                 total_ba_period= total_ba,
                 susc_nodata= -1,
                 pixel_to_ha_factor= self.settings_plt_susc['pixel_to_ha_factor'],
-                allow_hist= True,
+                allow_hist= allow_hist,
                 allow_pie= True,
-                allow_fires= True,
+                allow_fires= allow_fires,
                 normalize_over_y_axis= self.settings_plt_susc['normalize_over_y_axis'],
                 limit_barperc_to_show= 2,
                 is_categorical = True
@@ -351,11 +375,102 @@ class PostProcess:
             logging.info(f'no susc map for - {year}_{month}: {e}')
         
 
-    def merge_all_pngs(self):
+    def plot_alternative_susc(self, year, month):
+        path = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/susc_{year}_{month}.tif'
+        ft_path = f'{self.datapath}/fuel_type_4cl/{self.vs}/ft.tif'
+
+        susc = self.R.read_1band(path)
+        ft = self.R.read_1band(ft_path)
+
+        # put class 4 5 and 6 when susc is 1 2 3 and ft is 1
+        alt_susc = susc.copy()
+        mask = (susc == 1) & (ft == 1)
+        alt_susc[mask] = 4
+        mask = (susc == 2) & (ft == 1)
+        alt_susc[mask] = 5
+        mask = (susc == 3) & (ft == 1)
+        alt_susc[mask] = 6
+
+        # plot
+        outpath = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/PNG/susc_alternative_plot_{year}{month}.png'
+        os.makedirs(os.path.dirname(outpath), exist_ok=True)
+        self.R.plot_raster(alt_susc, title = f'susc {year}/{month:02d}',
+                           array_classes = [-1,0.1,1.1,2.1,3.1,4.1,5.1,6.1],
+                           array_names = ['No Data', 'Low', 'Medium', 'High', 'L - Grass', 'M - Grass', 'H - Grass'],
+                           array_colors = ['#0bd1f700','green', 'yellow', 'red', "#5be0ad", "#cece75", "#e081a2"],
+                           shrink_legend = 0.4,
+                           dpi = 200,
+                           outpath = outpath,
+                           figsize = (12,10)
+                           )
+        
+
+
+    def plot_haz(self, year, month):
+
+        if self.op == True:
+            allow_hist = False
+            allow_fires = False
+        else:
+            allow_hist = True
+            allow_fires = True
+
+        try:
+            hazard_file = f'{self.datapath}/fuel_maps/{self.vs}/fuel_{year}_{month}.tif'
+            os.makedirs(os.path.dirname(hazard_file), exist_ok=True)
+            with rio.open(hazard_file) as haz:
+                haz_arr = haz.read(1)
+                haz_ndoata = haz.nodata
+                unique, counts = np.unique(haz_arr, return_counts=True)
+                total_pixels = np.where(haz_arr==haz_ndoata, 0, 1).sum()
+                percentages = {int(k): int((v / total_pixels) * 100) for k, v in zip(unique, counts) if k != haz_ndoata}
+            with open(f'{os.path.dirname(hazard_file)}/fuel_percentage_{year}_{month}.csv', 'w') as f:
+                f.write('Fuel_Class,Percentage\n')
+                for k, v in percentages.items():
+                    f.write(f'{k},{v}\n')
+
+            out = os.path.join( os.path.dirname(hazard_file), 'PNG')
+            os.makedirs(out, exist_ok=True)
+
+            settings = dict(
+                fires_file=         self.fire_path,
+                fires_col=          self.fires_col,
+                crs=                self.working_crs,
+                hazard_path=        hazard_file,
+                xboxmin_hist= self.settings_plt_susc['xboxmin_hist'],
+                yboxmin_hist= self.settings_plt_susc['yboxmin_hist'],
+                xboxmin_pie= self.settings_plt_susc['xboxmin_pie'],
+                yboxmin_pie= self.settings_plt_susc['yboxmin_pie'],
+                out_folder=         out,
+                year=               year,
+                month=              month,
+                season=             False,
+                haz_nodata=         0,
+                pixel_to_ha_factor= self.settings_plt_susc['pixel_to_ha_factor'],
+                allow_hist=         allow_hist,
+                allow_pie=          True,
+                allow_fires=        allow_fires,
+                show_compressed_legend = True
+            )
+
+            self.F.plot_haz_with_bars(**settings)
+                
+
+        except Exception as e:
+            logging.info(f'no haz map for - {year}_{month}: {e}')
+
+
+
+    def merge_all_pngs(self, susc = True):
 
         yearmonths = [f"{year}{month}" for year in self.years for month in self.months]
-        year_filenames = [f'susc_plot_{yrm}' for yrm in yearmonths]
-        basep = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/PNG'
+        name = 'susc' if susc else 'fuel'
+        year_filenames = [f'{name}_plot_{yrm}' for yrm in yearmonths]
+        if susc:
+            basep = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/PNG'
+        else:
+            basep = f'{self.datapath}/fuel_maps/{self.vs}/PNG'
+
         year_files = [f"{basep}/{filename}.png" for filename in year_filenames]
         year_files = [f for f in year_files if os.path.exists(f)]
         
@@ -366,49 +481,55 @@ class PostProcess:
         # save image (Image object)
         out = f'{basep}/MERGED'
         os.makedirs(out, exist_ok=True)
-        fig.save(f"{out}/susc_plot_merged.png")
+        fig.save(f"{out}/{name}_plot_merged.png")
+
 
 
     def run_all(self):
-
+        
         if self.four_models:
             cls = ['1','2','3','4']
+            
             for cl in cls:
                 logging.info(f'Processing class {cl}...')
-                
-                # insert some checks of all the susc tiles are present, if not stop the process.
-                
+                    
                 logging.info('Removing tile borders...')
-                with mp.Pool(25) as pool:
-                    pool.starmap(self.remove_tile_borders, [(tile, year, month, cl) 
+                with mp.Pool(self.cores) as pool:
+                    pool.starmap(self.remove_tile_borders, [(tile, year, month, 10, cl) 
                                                             for tile in self.tiles for year in self.years for month in self.months])
 
                 logging.info('Merging susc tiles...')
-                with mp.Pool(25) as pool:
-                    pool.starmap(self.merge_susc_tiles, [(year, month, cl) 
+                with mp.Pool(self.cores) as pool:
+                    pool.starmap(self.merge_susc_tiles, [(year, month, cl, False) 
                                                         for year in self.years for month in self.months])
+                
                 
                 logging.info('Reprojecting merged susc...')
                 yearmonths = [f'{year}_{month}' for year in self.years for month in self.months]
-                for yr in yearmonths:
-                    self.reproj_merged_susc(yr, cl)
+                with mp.Pool(processes=self.cores//2) as pool:
+                    pool.starmap(self.reproj_merged_susc, [(yr, cl) for yr in yearmonths])
 
-                logging.info('Evaluating thresholds...')
-                thresholds = self.eval_thresholds(cl)
+                if not self.op:
+                    logging.info('Evaluating thresholds...')
+                    thresholds = self.eval_thresholds(cl)
+                else:
+                    thresholds_d = json.load(open(f'{self.datapath}/susceptibility/{self.vs}/{cl}/thresholds/thresholds.json'))
+                    thresholds = [thresholds_d['lv1'], thresholds_d['lv2']]
 
                 logging.info('Getting categoric susc...')
                 folder_susc = f'{self.datapath}/susceptibility/{self.vs}/{cl}' 
                 susc_names = [i for i in os.listdir(folder_susc) if i.endswith('.tif') and not i.endswith('raw.tif')]
-                with mp.Pool(processes=20) as pool:
+                with mp.Pool(processes=self.cores) as pool:
                     pool.starmap(self.get_categoric_susc, [(os.path.join(folder_susc, susc_name), thresholds, cl) 
                                                             for susc_name in susc_names])
                 
+        
             logging.info('Merging class outputs (all the cls)')
             # merge susc of different cl outputs
-            with mp.Pool(processes=20) as pool:
+            with mp.Pool(processes=self.cores//2) as pool:
                 pool.starmap(self.merge_cl_output, [(year, month, cls) for year in self.years for month in self.months])
 
-
+            
         else:
             
             # insert some checks of all the susc tiles are present, if not stop the process.
@@ -428,8 +549,12 @@ class PostProcess:
             for yr in yearmonths:
                 self.reproj_merged_susc(yr)
             
-            logging.info('Evaluating thresholds...')
-            thresholds = self.eval_thresholds()
+            if not self.op:
+                logging.info('Evaluating thresholds...')
+                thresholds = self.eval_thresholds()
+            else:
+                thresholds_d = json.load(open(f'{self.datapath}/susceptibility/{self.vs}/thresholds/thresholds.json'))
+                thresholds = [thresholds_d['lv1'], thresholds_d['lv2']]
 
             logging.info('Getting categoric susc...')
             folder_susc = f'{self.datapath}/susceptibility/{self.vs}' #/cl
@@ -438,26 +563,37 @@ class PostProcess:
                 pool.starmap(self.get_categoric_susc, [(os.path.join(folder_susc, susc_name), thresholds) 
                                                         for susc_name in susc_names])
             
-
+        
         # same operation for cl and not
         logging.info('--------------common op----------------')
 
-        logging.info('Getting fuel type...')
-        self.get_fuel_type()
+        if not os.path.exists(f'{self.datapath}/fuel_type_4cl/{self.vs}/ft.tif'):
+            logging.info('Getting fuel type...')
+            self.get_fuel_type()
 
         logging.info('Getting hazard maps...')
         with mp.Pool(processes=self.cores) as pool:
             pool.starmap(self.get_haz, [(year, month) 
                                         for year in self.years for month in self.months])
         
+        
         logging.info('Plotting susc maps...')
-        total_ba = gpd.read_file(self.fires_file).area.sum() / 10000
+        total_ba = gpd.read_file(self.fire_path).area.sum() / 10000
         with mp.Pool(processes=self.cores) as pool:
             pool.starmap(self.plot_susc, [(total_ba, thresholds[0], thresholds[1], year, month) 
                                         for year in self.years for month in self.months])
+
+
+        
+        # modify this with operational run, the name of the hazard to same as addition.    
+        logging.info('Plotting hazard maps...')
+        with mp.Pool(processes=self.cores) as pool:
+            pool.starmap(self.plot_haz, [(year, month) 
+                                        for year in self.years for month in self.months])
         
         logging.info('Merging all PNGs...')
-        self.merge_all_pngs()
+        self.merge_all_pngs(susc = True)
+        self.merge_all_pngs(susc = False) # fuel maps
 
         
 
