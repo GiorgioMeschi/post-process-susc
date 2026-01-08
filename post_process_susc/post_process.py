@@ -308,7 +308,7 @@ class PostProcess:
                             reference_file = self.dem_file, dtype = np.int8(), nodata = 0)
 
 
-    def merge_cl_output(self, year: int, month: int, cls: list[str], smooth = self.smooth):
+    def merge_cl_output(self, year: int, month: int, cls: list[str]):
 
         '''
         Merge the classified susceptibility maps from each class into a single map, for the case four_models is True
