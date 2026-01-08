@@ -40,10 +40,11 @@ class PostProcess:
                  cores= 25,
                  four_models=False,
                  op = False,
-                 custom_fuel_filename = None):
+                 custom_fuel_filename = None,
+                 smooth = True):
 
         '''
-        pProcess susceptibility maps and get fuel maps based on the a default tiled files structure.
+        Process susceptibility maps and get fuel maps based on the a default tiled files structure.
 
         Parameters
         ----------
@@ -84,6 +85,7 @@ class PostProcess:
         self.four_models = four_models
         self.op = op
         self.custom_fuel_filename = custom_fuel_filename
+        self.smooth = smooth
 
         self.R = gt.Raster()
         self.F = ff.FireTools()
@@ -306,7 +308,7 @@ class PostProcess:
                             reference_file = self.dem_file, dtype = np.int8(), nodata = 0)
 
 
-    def merge_cl_output(self, year: int, month: int, cls: list[str]):
+    def merge_cl_output(self, year: int, month: int, cls: list[str], smooth = self.smooth):
 
         '''
         Merge the classified susceptibility maps from each class into a single map, for the case four_models is True
@@ -338,8 +340,11 @@ class PostProcess:
                     dst.write(arr, 1)
                 # smooth
                 arr = arr.astype(float)
-                arr_smooth = ndimage.generic_filter(arr, np.nanmean, size=3, mode='nearest', cval=0)
-                arr_smooth = np.rint(arr_smooth).astype(arr.dtype)
+                if self.smooth:
+                    arr_smooth = ndimage.generic_filter(arr, np.nanmean, size=3, mode='nearest', cval=0)
+                    arr_smooth = np.rint(arr_smooth).astype(arr.dtype)
+                else:
+                    arr_smooth = arr
                 with rio.open(out_smooth, 'w', **out_meta) as dst:
                     dst.write(arr_smooth, 1)
                 del arr, arr_smooth

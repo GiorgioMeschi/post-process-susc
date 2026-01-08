@@ -5,7 +5,7 @@ with open("README.md", "r") as fh:
 
 setuptools.setup(
     name="post_process_susc",
-    version="1.0.1",
+    version="1.0.2",
     author="Giorgio Meschi",
     author_email="giorgio.meschi@cimafoundation.org",
     description="Post process raw and tiled output from ML",
