@@ -462,9 +462,9 @@ class PostProcess:
             mask = (susc == 1) & (ft == 1)
             alt_susc[mask] = 4
             mask = (susc == 2) & (ft == 1)
-            alt_susc[mask] = 5
+            alt_susc[mask] = 4
             mask = (susc == 3) & (ft == 1)
-            alt_susc[mask] = 6
+            alt_susc[mask] = 4
 
             # save
             out_alt_susc = f'{self.datapath}/susceptibility/{self.vs}/susc_classified/susc_{year}_{month}_alternative.tif'
@@ -508,9 +508,9 @@ class PostProcess:
                 normalize_over_y_axis= self.settings_plt_susc['normalize_over_y_axis'],
                 limit_barperc_to_show= 2,
                 is_categorical = True,
-                options = dict( array_classes = [-1,0.1,1.1,2.1,3.1,4.1,5.1,6.1],
-                                array_names = ['No Data', 'Low', 'Medium', 'High', 'L - Grass', 'M - Grass', 'H - Grass'],
-                                array_colors = ['#0bd1f700','green', 'yellow', 'red', "#5be0ad", "#cece75", "#e081a2"],
+                options = dict( array_classes = [-1,0.1,1.1,2.1,3.1,4.1],
+                                array_names = ['No Data', 'Low', 'Medium', 'High', 'Grass mask'],
+                                array_colors = ['#0bd1f700','green', 'yellow', 'red', "#5c605f20"], #  "#5be0ad", "#cece75", "#e081a2"
                                )
                 )
             
